@@ -48,9 +48,85 @@ ICAOTOP25 = [
 ]
 
 
-def readCSV(file, hello):
-    pass
+def extractDataNew(start: datetime, end: datetime, saveFolder: str = "data/flights", folderName: str = "data"):
+    # Basic input validation
+    if start.year < 2015 or start.year > 2019:
+        raise ValueError(f"Incorrect start date (start between 2015 and 2019) {start}")
+    if end.year < 2015 or end.year > 2019:
+        raise ValueError(f"Incorrect end date (end between 2015 and 2019) {end}")
+    if end.year < start.year:
+        raise ValueError(f"Entered end before start ({start} > {end})")
 
+    years = list(range(start.year, end.year + 1))
+    listOfFiles = []
+    for year in years:
+        # Dank file selection https://pynative.com/python-glob/
+        listOfFiles.extend(glob(f"{folderName}\\{year}/*/Flights_2*.csv*"))
+
+    finalData = pd.DataFrame(
+        columns=[
+            "ECTRL ID",
+            "ADEP",
+            "ADEP Latitude",
+            "ADEP Longitude",
+            "ADES",
+            "ADES Latitude",
+            "ADES Longitude",
+            "FILED OFF BLOCK TIME",
+            "FILED ARRIVAL TIME",
+            "ACTUAL OFF BLOCK TIME",
+            "ACTUAL ARRIVAL TIME",
+            "AC Type",
+            "AC Operator",
+            "AC Registration",
+            "ICAO Flight Type",
+            "STATFOR Market Segment",
+            "Requested FL",
+            "Actual Distance Flown (nm)",
+        ]
+    )
+
+    for file in tqdm(listOfFiles):
+        # read, filter and process csv
+        P = pd.read_csv(file)
+
+        P = (
+            P.assign(FiledOBT=lambda df: df["FILED OFF BLOCK TIME"].to_datetime("%d-%m-%Y %H:%M:%S"))
+            .assign(FiledAT=lambda df: df["FILED ARRIVAL TIME"].to_datetime("%d-%m-%Y %H:%M:%S"))
+            .assign(OBT=lambda df: df["ACTUAL OFF BLOCK TIME"].to_datetime("%d-%m-%Y %H:%M:%S"))
+            .assign(ActualAT=lambda df: df["ACTUAL ARRIVAL TIME"].to_datetime("%d-%m-%Y %H:%M:%S"))
+            .query()
+            .groupby()
+            .agg()
+        )
+
+        # P = P[(P["ADEP"].isin(airports)) | (P["ADES"].isin(airports))]
+        if airports is not None:
+            P = P[(P["ADEP"].isin(airports))]
+
+        if europeanFlights:
+            P = P[
+                (P["ADEP"].str[0].isin(["E", "B", "L", "U"]))
+                & (P["ADES"].str[0].isin(["E", "B", "L", "U"]))
+            ]
+
+        # This is kinda wonky atm
+        P = P[
+            (P["FILED OFF BLOCK TIME"] >= start) | (P["ACTUAL OFF BLOCK TIME"] >= start)
+        ]
+        P = P[(P["FILED ARRIVAL TIME"] <= end) | (P["ACTUAL ARRIVAL TIME"] <= end)]
+
+        P = P.query(
+            "'FILED OFF BLOCK TIME' >= @start and 'ACTUAL OFF BLOCK TIME' >= @start and 'ACTUAL OFF BLOCK TIME' >= @start"
+        )
+
+        # add queries
+
+        finalData = finalData.append(P, ignore_index=True)
+
+    finalData = finalData.sort_values(by=["ECTRL ID"])
+
+    return finalData
 
 def extractData(
     start: datetime,
@@ -110,6 +186,15 @@ def extractData(
         ]
         P[timeCols] = P[timeCols].apply(pd.to_datetime, format="%d-%m-%Y %H:%M:%S")
 
+        P = (
+            P.assign(FOBT=lambda df: df.FOBT.to_datetime("%d-%m-%Y %H:%M:%S"))
+            .assign(FOBT=lambda df: df.FOBT.to_datetime("%d-%m-%Y %H:%M:%S"))
+            .assign(FOBT=lambda df: df.FOBT.to_datetime("%d-%m-%Y %H:%M:%S"))
+            .query()
+            .groupby()
+            .agg()
+        )
+
         # P = P[(P["ADEP"].isin(airports)) | (P["ADES"].isin(airports))]
         if airports is not None:
             P = P[(P["ADEP"].isin(airports))]
@@ -125,6 +210,12 @@ def extractData(
             (P["FILED OFF BLOCK TIME"] >= start) | (P["ACTUAL OFF BLOCK TIME"] >= start)
         ]
         P = P[(P["FILED ARRIVAL TIME"] <= end) | (P["ACTUAL ARRIVAL TIME"] <= end)]
+
+        P = P.query(
+            "'FILED OFF BLOCK TIME' >= @start and 'ACTUAL OFF BLOCK TIME' >= @start and 'ACTUAL OFF BLOCK TIME' >= @start"
+        )
+
+        # add queries
 
         finalData = finalData.append(P, ignore_index=True)
 
@@ -146,7 +237,7 @@ def delayCalc(P):
     P["blockoffDelayMinutes"] = P["blockoffDelay"].astype("timedelta64[m]")
     P["flightTimeDelayMinutes"] = P["flightTimeDifference"].astype("timedelta64[m]")
 
-    P["On Time"] = (P["arrivalDelayMinutes"]).abs() < 15.0
+    P["On Time"] = P(P["arrivalDelayMinutes"]).abs() < 15.0
 
     return P
 
@@ -165,15 +256,26 @@ def airportBoxPlot(P, airports, delayType="blockoffDelayMinutes", showfliers=Fal
     ax.set_ylabel("Delay in Minutes")
     ax.grid()
 
+
 def segmentBoxPlot(P, showfliers=False):
     lstofData = []
 
-    categories = ['Business Aviation', 'All-Cargo', 'Traditional Scheduled', 'Lowcost', 'Charter']
+    categories = [
+        "Business Aviation",
+        "All-Cargo",
+        "Traditional Scheduled",
+        "Lowcost",
+        "Charter",
+    ]
 
     fig, ax = plt.subplots(1, 1)
 
     for category in categories:
-        lstofData.append(P[P["STATFOR Market Segment"] == category]["blockoffDelayMinutes"].to_numpy())
+        lstofData.append(
+            P[P["STATFOR Market Segment"] == category][
+                "blockoffDelayMinutes"
+            ].to_numpy()
+        )
     lstofData.append(P[b["ICAO Flight Type"] == "S"]["blockoffDelayMinutes"].to_numpy())
     lstofData.append(P[b["ICAO Flight Type"] == "N"]["blockoffDelayMinutes"].to_numpy())
     categories.append("S")
@@ -225,11 +327,38 @@ if __name__ == "__main__":
     # print(b["STATFOR Market Segment"].unique()) # ['Business Aviation' 'All-Cargo' 'Traditional Scheduled' 'Lowcost' 'Charter']
     total = len(b)
     print(f"Total N = {total}")
-    print('Business Aviation =', round(len(b[b["STATFOR Market Segment"] == 'Business Aviation'])/total*100,2), "%")
-    print('All-Cargo =', round(len(b[b["STATFOR Market Segment"] == 'All-Cargo'])/total*100,2), "%")
-    print('Traditional Scheduled =', round(len(b[b["STATFOR Market Segment"] == 'Traditional Scheduled'])/total*100,2), "%")
-    print('Lowcost =', round(len(b[b["STATFOR Market Segment"] == 'Lowcost'])/total*100,2), "%")
-    print('Charter =', round(len(b[b["STATFOR Market Segment"] == 'Charter'])/total*100,2), "%")
+    print(
+        "Business Aviation =",
+        round(
+            len(b[b["STATFOR Market Segment"] == "Business Aviation"]) / total * 100, 2
+        ),
+        "%",
+    )
+    print(
+        "All-Cargo =",
+        round(len(b[b["STATFOR Market Segment"] == "All-Cargo"]) / total * 100, 2),
+        "%",
+    )
+    print(
+        "Traditional Scheduled =",
+        round(
+            len(b[b["STATFOR Market Segment"] == "Traditional Scheduled"])
+            / total
+            * 100,
+            2,
+        ),
+        "%",
+    )
+    print(
+        "Lowcost =",
+        round(len(b[b["STATFOR Market Segment"] == "Lowcost"]) / total * 100, 2),
+        "%",
+    )
+    print(
+        "Charter =",
+        round(len(b[b["STATFOR Market Segment"] == "Charter"]) / total * 100, 2),
+        "%",
+    )
 
     # print('Business Aviation AVG DELAY=', (b[b["STATFOR Market Segment"] == 'Business Aviation']["arrivalDelayMinutes"].abs().mean()))
     # print('All-Cargo AVG DELAY=', (b[b["STATFOR Market Segment"] == 'All-Cargo']["arrivalDelayMinutes"].abs().mean()))
