@@ -28,6 +28,7 @@ def extractData(
     Returns:
         pd.DataFrame: complete pandas flights dataframe
     """
+
     # Basic input validation
     if start is None and end is None:
         start = datetime(2015, 1, 1)
@@ -122,6 +123,7 @@ def filterAirports(P: pd.DataFrame, airports: list):
     Returns:
         pd.DataFrame: filtered flights dataframe
     """
+
     P = P.query("`ADEP` in @airports & `ADES` in @airports")
     return P
 
@@ -166,6 +168,7 @@ def saveToCSV(P: pd.DataFrame, saveFolder: str = "LRData"):
         P (pd.DataFrame): Pandas flights dataframe
         saveFolder (str): name folder to save the CSV file in. Defaults to "LRData".
     """
+
     if not os.path.exists(saveFolder):
         os.mkdir(os.path.join(saveFolder))
     P.to_csv(f"{saveFolder}/LRDATA.csv")
@@ -185,7 +188,7 @@ def readLRDATA(saveFolder: str = "LRData", fileName: str = "LRDATA.csv"):
     P = pd.read_csv(fullfilename, header=0, index_col=0)
     return P
 
-
+  
 if __name__ == "__main__":
     start = datetime(2015, 1, 1)
     end = datetime(2019, 4, 30)
